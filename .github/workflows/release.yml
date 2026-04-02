@@ -146,10 +146,17 @@ jobs:
 
       - name: Add additional assets into package
         run: |
+          # 关键：确保目标目录存在，-p 参数代表“如果已存在则忽略，不存在则创建”
+          mkdir -p build_assets
+          
+          # 搬运 Geo 数据
           mv -f resources/geo* build_assets/
+          
           if [[ ${GOOS} == 'windows' ]]; then
             echo 'CreateObject("Wscript.Shell").Run "xray.exe -config config.json",0' > build_assets/xray_no_window.vbs
             echo 'Start-Process -FilePath ".\xray.exe" -ArgumentList "-config .\config.json" -WindowStyle Hidden' > build_assets/xray_no_window.ps1
+            
+            # 搬运 Wintun 驱动
             if [[ ${GOARCH} == 'amd64' ]]; then
               mv resources/wintun/bin/amd64/wintun.dll build_assets/
             fi
@@ -161,7 +168,7 @@ jobs:
             fi
             mv resources/wintun/LICENSE.txt build_assets/LICENSE-wintun.txt
           fi
-
+          
       - name: Copy README.md & LICENSE
         run: |
           cp ${GITHUB_WORKSPACE}/README.md ./build_assets/README.md
