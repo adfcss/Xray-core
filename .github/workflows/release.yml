@@ -48,7 +48,7 @@ jobs:
         uses: actions/cache/save@v5
         with:
           path: resources
-          key: xray-assets-${{ github.run_id }}
+          key: xray-assets-latest
 
   build:
     needs: check-assets
