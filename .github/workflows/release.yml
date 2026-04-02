@@ -32,7 +32,13 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.24'
+          # 关键：固定使用 1.25 版本
+          go-version: '1.25'
+
+      - name: Patch go.mod version
+        # 因为你的 go.mod 写的是 1.26，而在 1.25 环境下运行会报错
+        # 我们用 sed 把代码里的 1.26 临时改成 1.25 骗过编译器
+        run: sed -i 's/go 1.26/go 1.25/g' go.mod
 
       - name: Install Garble
         run: |
