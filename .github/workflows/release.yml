@@ -44,11 +44,15 @@ jobs:
           fi
 
       # 既然下载了新资源，顺手存一下缓存，下次就不用下了
-      - name: Save Assets Cache
-        uses: actions/cache/save@v5
+      - name: Restore Assets Cache
+        uses: actions/cache/restore@v5
         with:
           path: resources
+          # 尝试读取最新的 key
           key: xray-assets-latest
+          # 关键：如果上面的 key 没找到，允许通过前缀模糊匹配
+          restore-keys: |
+            xray-assets-
 
   build:
     needs: check-assets
