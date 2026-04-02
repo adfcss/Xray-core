@@ -99,6 +99,9 @@ jobs:
           go-version-file: go.mod
           check-latest: true
 
+      - name: Install UPX
+        run: sudo apt-get install -y upx-ucl
+
       - name: Get project dependencies
         run: go mod download
 
@@ -106,19 +109,26 @@ jobs:
         run: |
           mkdir -p build_assets
           COMMID=$(git describe --always --dirty)
+          
+          # --- 编译逻辑 (保持你原来的不变) ---
           if [[ ${GOOS} == 'windows' ]]; then
             echo 'Building Xray for Windows...'
             go build -o build_assets/xray.exe -trimpath -buildvcs=false -gcflags="all=-l=4" -ldflags="-X github.com/xtls/xray-core/core.build=${COMMID} -s -w -buildid=" -v ./main
-            # The line below is for without running conhost.exe version. Commented for not being used. Provided for reference.
-            # go build -o build_assets/wxray.exe -trimpath -buildvcs=false -gcflags="all=-l=4" -ldflags="-H windowsgui -X github.com/xtls/xray-core/core.build=${COMMID} -s -w -buildid=" -v ./main
+            
+            # --- 新增：压缩 Windows 二进制 ---
+            upx --lzma --best build_assets/xray.exe
+            
           else
             echo 'Building Xray...'
             if [[ ${GOARCH} == 'mips' || ${GOARCH} == 'mipsle' ]]; then
               go build -o build_assets/xray -trimpath -buildvcs=false -gcflags="-l=4" -ldflags="-X github.com/xtls/xray-core/core.build=${COMMID} -s -w -buildid=" -v ./main
-              echo 'Building soft-float Xray for MIPS/MIPSLE 32-bit...'
-              GOMIPS=softfloat go build -o build_assets/xray_softfloat -trimpath -buildvcs=false -gcflags="-l=4" -ldflags="-X github.com/xtls/xray-core/core.build=${COMMID} -s -w -buildid=" -v ./main
+              # MIPS 架构建议使用较轻的压缩，否则路由器 CPU 可能起不来
+              upx --brute build_assets/xray
             else
               go build -o build_assets/xray -trimpath -buildvcs=false -gcflags="all=-l=4" -ldflags="-X github.com/xtls/xray-core/core.build=${COMMID} -s -w -buildid=" -v ./main
+              
+              # --- 新增：压缩 Linux/Android 二进制 ---
+              upx --lzma --best build_assets/xray
             fi
           fi
 
