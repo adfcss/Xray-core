@@ -2,6 +2,8 @@ name: Build and Release
 
 on:
   workflow_dispatch:
+  release:
+    types: [published]
 
 jobs:
   build:
@@ -24,47 +26,53 @@ jobs:
     steps:
       - name: Checkout codebase
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
-      - name: Install UPX
-        run: sudo apt-get install -y upx-ucl
+      - name: Install Garble
+        run: |
+          go install mvdan.cc/garble@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
-      - name: Build and UPX
+      - name: Build with Garble
         run: |
           mkdir -p build_assets
-          COMMID=$(git describe --always --dirty)
+          # 获取版本 ID
+          COMMID=$(git describe --always --dirty || echo "custom-build")
           
-          # 执行编译（只产出核心二进制）
-          go build -o build_assets/xray -trimpath -buildvcs=false -gcflags="all=-l=4" -ldflags="-X github.com/xtls/xray-core/core.build=${COMMID} -s -w -buildid=" -v ./main
-          
-          # 执行 UPX 压缩
-          upx --lzma --best build_assets/xray
+          # 核心混淆编译命令
+          garble -literals -tiny build \
+            -o build_assets/xray \
+            -trimpath \
+            -buildvcs=false \
+            -ldflags="-X github.com/xtls/xray-core/core.build=${COMMID} -s -w -buildid=" \
+            -v ./main
 
-      - name: Create ZIP archive
-        if: github.event_name == 'release'
-        shell: bash
+      - name: UPX Compression
         run: |
-          # 只压缩 build_assets 里的核心文件
-          pushd build_assets || exit 1
-          # 仅打包 xray 那个文件，不打包整个目录
-          zip -9j ../Xray-${{ matrix.goos }}-${{ matrix.goarch }}.zip xray
-          popd || exit 1
+          sudo apt-get install -y upx-ucl
+          upx --lzma --best --force build_assets/xray
 
-      - name: Upload binaries to release
+      # --- 如果是 Release 发布，直接上传二进制文件到 Release 页面 ---
+      - name: Upload Binary to Release
         uses: svenstaro/upload-release-action@v2
         if: github.event_name == 'release'
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: ./Xray-*.zip
+          file: build_assets/xray
+          asset_name: xray-${{ matrix.goos }}-${{ matrix.goarch }}
           tag: ${{ github.ref }}
-          file_glob: true
+          overwrite: true
 
-      - name: Upload to Artifacts
-        uses: actions/upload-artifact@v7
+      # --- 无论什么触发方式，都上传到 Actions Artifacts 方便直接下载 ---
+      - name: Upload Binary to Artifacts
+        uses: actions/upload-artifact@v4
         with:
           name: Xray-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: ./build_assets/xray
+          path: build_assets/xray
+          retention-days: 5
