@@ -7,54 +7,48 @@ jobs:
   check-assets:
     runs-on: ubuntu-latest
     steps:
-      # 1. 尝试从云端恢复缓存（使用递增的 run_number 保证 Key 唯一，配合 restore-keys 找旧版）
-      - name: Restore Assets Cache
+      - name: Restore Geodat Cache
         uses: actions/cache/restore@v5
         with:
           path: resources
-          key: xray-assets-${{ github.run_number }}
-          restore-keys: |
-            xray-assets-
-            xray-geodat-
-            xray-wintun-
+          key: xray-geodat-
 
-      # 2. 核心逻辑：检查资源，缺什么就补什么
+      - name: Restore Wintun Cache
+        uses: actions/cache/restore@v5
+        with:
+          path: resources
+          key: xray-wintun-
+
       - name: Check and Download Missing Assets
-        id: download-assets
         run: |
           mkdir -p resources
           
-          # --- 检查 GeoIP / GeoSite ---
+          # --- 检查并下载 GeoIP/GeoSite ---
+          # 定义需要下载的文件名
           declare -A geofiles=( ["geoip.dat"]="geoip" ["geosite.dat"]="geosite" )
           for FILE in "${!geofiles[@]}"; do
             if [ ! -s "./resources/$FILE" ]; then
-              echo "⚠️ $FILE missing, downloading from Loyalsoldier..."
+              echo "$FILE missing, downloading..."
               curl -L "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/${geofiles[$FILE]}.dat" -o "./resources/$FILE"
-              echo "updated=true" >> $GITHUB_OUTPUT
             else
-              echo "✅ $FILE already exists."
+              echo "$FILE exists."
             fi
           done
 
-          # --- 检查 Wintun (Windows 编译所需) ---
+          # --- 检查并下载 Wintun (如果需要 Windows 编译) ---
           if [ ! -d "./resources/wintun" ]; then
-            echo "⚠️ Wintun missing, downloading..."
+            echo "Wintun missing, downloading..."
             curl -L "https://www.wintun.net/builds/wintun-0.14.1.zip" -o wintun.zip
             unzip -q wintun.zip -d resources/
             rm wintun.zip
-            echo "updated=true" >> $GITHUB_OUTPUT
-          else
-            echo "✅ Wintun already exists."
           fi
 
-      # 3. 如果上一步下载了新东西，则保存到新缓存中
+      # 既然下载了新资源，顺手存一下缓存，下次就不用下了
       - name: Save Assets Cache
         uses: actions/cache/save@v5
-        # 仅当下载过新文件，或者缓存完全没命中时才执行保存，节省时间
-        if: steps.download-assets.outputs.updated == 'true' || steps.Restore-Assets-Cache.outputs.cache-hit != 'true'
         with:
           path: resources
-          key: xray-assets-${{ github.run_number }}
+          key: xray-assets-${{ github.run_id }}
 
   build:
     needs: check-assets
@@ -128,35 +122,25 @@ jobs:
             fi
           fi
 
-      - name: Checkout codebase
-        uses: actions/checkout@v6
-
-      # --- 插入这一步，放在 Build 之前 ---
-      - name: Restore Assets Cache
+      - name: Restore Geodat Cache
         uses: actions/cache/restore@v5
         with:
           path: resources
-          # 必须和 check-assets 存的 Key 完全一致
-          key: xray-assets-${{ github.run_number }}
-          # 兜底：如果这一号没存成功，就找之前存过的最新一个
-          restore-keys: |
-            xray-assets-
+          key: xray-geodat-
 
-      # ... 接下来的 Set up Go, Build Xray 等步骤 ...
+      - name: Restore Wintun Cache
+        if: matrix.goos == 'windows'
+        uses: actions/cache/restore@v5
+        with:
+          path: resources
+          key: xray-wintun-
 
       - name: Add additional assets into package
         run: |
-          # 关键：确保目标目录存在，-p 参数代表“如果已存在则忽略，不存在则创建”
-          mkdir -p build_assets
-          
-          # 搬运 Geo 数据
           mv -f resources/geo* build_assets/
-          
           if [[ ${GOOS} == 'windows' ]]; then
             echo 'CreateObject("Wscript.Shell").Run "xray.exe -config config.json",0' > build_assets/xray_no_window.vbs
             echo 'Start-Process -FilePath ".\xray.exe" -ArgumentList "-config .\config.json" -WindowStyle Hidden' > build_assets/xray_no_window.ps1
-            
-            # 搬运 Wintun 驱动
             if [[ ${GOARCH} == 'amd64' ]]; then
               mv resources/wintun/bin/amd64/wintun.dll build_assets/
             fi
@@ -168,7 +152,7 @@ jobs:
             fi
             mv resources/wintun/LICENSE.txt build_assets/LICENSE-wintun.txt
           fi
-          
+
       - name: Copy README.md & LICENSE
         run: |
           cp ${GITHUB_WORKSPACE}/README.md ./build_assets/README.md
