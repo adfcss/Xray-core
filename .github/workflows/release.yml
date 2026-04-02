@@ -2,8 +2,6 @@ name: Build and Release
 
 on:
   workflow_dispatch:
-  release:
-    types: [published]
 
 jobs:
   build:
@@ -26,58 +24,41 @@ jobs:
     steps:
       - name: Checkout codebase
         uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
+
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25'
+          go-version-file: go.mod
 
-      - name: Patch go.mod version
-        run: |
-          # 1. 强行降级版本号
-          sed -i 's/go 1.26/go 1.25/g' go.mod
-          # 2. 核心：同步并修复依赖关系，这是解决刚才报错的关键
-          go mod tidy
+      - name: Install UPX
+        run: sudo apt-get install -y upx-ucl
 
-      - name: Install Garble
-        run: |
-          go install mvdan.cc/garble@latest
-          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
-
-      - name: Build with Garble
+      - name: Build and UPX
         run: |
           mkdir -p build_assets
-          COMMID=$(git describe --always --dirty || echo "custom-build")
+          COMMID=$(git describe --always --dirty)
           
-          # 现在执行 garble 应该就不会再弹出 "go.mod needed updates" 了
-          garble -literals -tiny build \
-            -o build_assets/xray \
-            -trimpath \
-            -buildvcs=false \
-            -ldflags="-X github.com/xtls/xray-core/core.build=${COMMID} -s -w -buildid=" \
-            -v ./main
+          # 修改输出文件名，增加系统和架构后缀，方便区分
+          # 如果你希望在本地依然叫 xray，可以保持不变，但在上传时手动重命名
+          go build -o build_assets/xray-${{ matrix.goos }}-${{ matrix.goarch }} -trimpath -buildvcs=false -gcflags="all=-l=4" -ldflags="-X github.com/xtls/xray-core/core.build=${COMMID} -s -w -buildid=" -v ./main
+          
+          # 执行 UPX 压缩
+          upx --lzma --best build_assets/xray-${{ matrix.goos }}-${{ matrix.goarch }}
 
-      - name: UPX Compression
-        run: |
-          sudo apt-get install -y upx-ucl
-          upx --lzma --best --force build_assets/xray
+      # --- 已移除 Create ZIP archive 步骤 ---
 
-      # --- 如果是 Release 发布，直接上传二进制文件到 Release 页面 ---
-      - name: Upload Binary to Release
+      - name: Upload binaries to release
         uses: svenstaro/upload-release-action@v2
         if: github.event_name == 'release'
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: build_assets/xray
-          asset_name: xray-${{ matrix.goos }}-${{ matrix.goarch }}
+          # 指向 build_assets 目录下的二进制文件
+          file: build_assets/xray-${{ matrix.goos }}-${{ matrix.goarch }}
           tag: ${{ github.ref }}
-          overwrite: true
+          asset_name: xray-${{ matrix.goos }}-${{ matrix.goarch }} # 指定在 Release 页面显示的名字
 
-      # --- 无论什么触发方式，都上传到 Actions Artifacts 方便直接下载 ---
-      - name: Upload Binary to Artifacts
-        uses: actions/upload-artifact@v4
+      - name: Upload to Artifacts
+        uses: actions/upload-artifact@v4 # 建议使用 v4，v7 目前并非官方主流版本
         with:
-          name: Xray-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: build_assets/xray
-          retention-days: 5
+          name: xray-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: build_assets/xray-${{ matrix.goos }}-${{ matrix.goarch }}
